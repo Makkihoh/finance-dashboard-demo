@@ -777,7 +777,13 @@ img, svg { display: block; max-width: 100%; }
   background: var(--bg-card);
   border: 1px solid var(--glass-border);
   text-align: center;
+  transition: border-color var(--tr-fast);
 }
+.dash-kpi-link {
+  cursor: pointer;
+}
+.dash-kpi-link:hover { border-color: var(--color-warn); }
+.dash-kpi-link:active { opacity: 0.8; }
 .kpi-val {
   font-size: var(--fs-md);
   font-weight: var(--fw-bold);
@@ -800,7 +806,11 @@ img, svg { display: block; max-width: 100%; }
   border: 1px solid rgba(240,185,11,0.18);
   font-size: var(--fs-sm);
   color: var(--color-warn);
+  cursor: pointer;
+  transition: border-color var(--tr-fast);
 }
+.next-action:hover { border-color: var(--color-warn); }
+.next-action:active { opacity: 0.8; }
 .next-action svg { flex-shrink: 0; }
 
 /* ── 通知中心 ── */
@@ -3404,19 +3414,17 @@ function renderDashboard() {
   var monthlySurplus = monthlyIncome - monthlyExpense;
 
   html += '<div class="dash-kpi-row">';
-  html += '  <div class="dash-kpi" onclick="switchTab(\'ledger\')" style="cursor:pointer">';
+  html += '  <div class="dash-kpi dash-kpi-link" onclick="switchTab(\'ledger\')">';
   html += '    <div class="kpi-val num" style="color:var(--color-info)">' + fmtMoneyShort(monthlySurplus) + '</div>';
   html += '    <div class="kpi-label">月结余' + (latestYM ? ' · ' + latestYM.split('-')[1] + '月' : '') + '</div>';
-  html += '    <div style="font-size:10px;color:var(--color-warn);margin-top:2px">补录收支 →</div>';
   html += '  </div>';
   html += '  <div class="dash-kpi">';
   html += '    <div class="kpi-val num" style="color:var(--color-success)">' + savingsRate.toFixed(1) + '%</div>';
   html += '    <div class="kpi-label">储蓄率</div>';
   html += '  </div>';
-  html += '  <div class="dash-kpi" onclick="switchTab(\'plan\')" style="cursor:pointer">';
+  html += '  <div class="dash-kpi dash-kpi-link" onclick="switchTab(\'plan\')">';
   html += '    <div class="kpi-val num">' + doneCount + '/' + allTasks.length + '</div>';
   html += '    <div class="kpi-label">任务进度</div>';
-  html += '    <div style="font-size:10px;color:var(--color-warn);margin-top:2px">查看计划 →</div>';
   html += '  </div>';
   html += '</div>';
 
@@ -3427,7 +3435,6 @@ function renderDashboard() {
     html += '<div class="next-action" onclick="switchTab(\'plan\')" style="cursor:pointer">';
     html += '  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';
     html += '  <span style="flex:1">下一步: ' + (nextTask.text || '--') + '</span>';
-    html += '  <span style="font-size:var(--fs-xs);color:var(--color-warn)">去执行 →</span>';
     html += '</div>';
   }
 
