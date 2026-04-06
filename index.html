@@ -3578,18 +3578,21 @@ function renderHoldings() {
     }
   });
 
-  // 现金资产
+  // 券商现金（与首页 calcAssetBreakdown 的 brokerCash 口径一致）
   var fm = DATA.family || {};
   if (fm.cashBreakdown) {
     cashTotal += (fm.cashBreakdown.tigerUSD || 0) * USDCNY;
     cashTotal += (fm.cashBreakdown.tigerHKD || 0) * HKDCNY;
     cashTotal += (fm.cashBreakdown.aShareCash || 0);
-    cashTotal += (fm.cashBreakdown.yuebao || 0);
-    cashTotal += (fm.cashBreakdown.zhaozhaoying || 0);
-    if (fm.cashBreakdown.bankDeposit) cashTotal += (fm.cashBreakdown.bankDeposit.amount || 0);
   }
 
-  var grandTotal = totalSecValue + cashTotal;
+  // 流动资金（cashAccounts）— 与首页口径一致
+  var liquidCash = 0;
+  if (typeof getCashAccountTotal === 'function') {
+    liquidCash = getCashAccountTotal();
+  }
+
+  var grandTotal = totalSecValue + cashTotal + liquidCash;
   var totalPnl = totalSecCost > 0 ? totalSecValue - totalSecCost : 0;
   var totalPnlPct = totalSecCost > 0 ? (totalSecValue - totalSecCost) / totalSecCost : 0;
 
