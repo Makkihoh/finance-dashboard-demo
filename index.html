@@ -3170,13 +3170,19 @@ function calcAssetBreakdown() {
     }
   });
 
-  // 券商现金
+  // 券商现金（优先用用户填的 CNY 总额，兼容旧的分币种字段）
   var brokerCash = 0;
   var fm = DATA.family || {};
   if (fm.cashBreakdown) {
-    brokerCash += (fm.cashBreakdown.tigerUSD || 0) * USDCNY;
-    brokerCash += (fm.cashBreakdown.tigerHKD || 0) * HKDCNY;
-    brokerCash += (fm.cashBreakdown.aShareCash || 0);
+    if (fm.cashBreakdown.totalCNY != null) {
+      // 新方式：用户直接填券商显示的人民币总余额
+      brokerCash = fm.cashBreakdown.totalCNY;
+    } else {
+      // 旧方式：分币种×汇率（不够精确，但兼容）
+      brokerCash += (fm.cashBreakdown.tigerUSD || 0) * USDCNY;
+      brokerCash += (fm.cashBreakdown.tigerHKD || 0) * HKDCNY;
+      brokerCash += (fm.cashBreakdown.aShareCash || 0);
+    }
   }
 
   var holdingsTotal = securityTotal + brokerCash; // 持仓页预估总资产
@@ -3579,12 +3585,16 @@ function renderHoldings() {
     }
   });
 
-  // 券商现金（与首页 calcAssetBreakdown 的 brokerCash 口径一致）
+  // 券商现金（优先用 CNY 总额，兼容旧的分币种字段）
   var fm = DATA.family || {};
   if (fm.cashBreakdown) {
-    cashTotal += (fm.cashBreakdown.tigerUSD || 0) * USDCNY;
-    cashTotal += (fm.cashBreakdown.tigerHKD || 0) * HKDCNY;
-    cashTotal += (fm.cashBreakdown.aShareCash || 0);
+    if (fm.cashBreakdown.totalCNY != null) {
+      cashTotal = fm.cashBreakdown.totalCNY;
+    } else {
+      cashTotal += (fm.cashBreakdown.tigerUSD || 0) * USDCNY;
+      cashTotal += (fm.cashBreakdown.tigerHKD || 0) * HKDCNY;
+      cashTotal += (fm.cashBreakdown.aShareCash || 0);
+    }
   }
 
   // 流动资金（cashAccounts）— 与首页口径一致
