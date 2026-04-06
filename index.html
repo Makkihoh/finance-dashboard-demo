@@ -1919,8 +1919,8 @@ img, svg { display: block; max-width: 100%; }
 
 const STORE_KEY = 'dashboard_v7_demo';
 const DATA_VERSION = '8.7-demo';
-var USDCNY = 7.25;
-var HKDCNY = 0.93;
+var USDCNY = 6.90;
+var HKDCNY = 0.88;
 
 const LAYER_META = {
   safety:   { name: '安全垫',   color: '#F0B90B', order: 0 },
@@ -5660,45 +5660,66 @@ function _parseQQVars(holdings) {
 }
 
 /**
- * 拉实时汇率 — 多源 fallback + 超时
+ * 拉实时汇率 — 4源瀑布 fallback + 5秒超时 + 持久化
  * 返回 { USDCNY: number, HKDCNY: number }
  */
 function fetchFXRates() {
+  // 按稳定性排序：frankfurter(最稳) → fawazahmed0(CDN快) → open.er → exchangerate
   var sources = [
-    'https://api.exchangerate-api.com/v4/latest/USD',
-    'https://open.er-api.com/v6/latest/USD'
+    { url: 'https://api.frankfurter.app/latest?from=USD&to=CNY,HKD', parse: function(d) {
+        var r = d.rates || {};
+        if (r.CNY && r.HKD) return { USDCNY: r.CNY, HKDCNY: r.CNY / r.HKD };
+        return null;
+      }
+    },
+    { url: 'https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json', parse: function(d) {
+        var u = d.usd || {};
+        if (u.cny && u.hkd) return { USDCNY: u.cny, HKDCNY: u.cny / u.hkd };
+        return null;
+      }
+    },
+    { url: 'https://open.er-api.com/v6/latest/USD', parse: function(d) {
+        var r = d.rates || {};
+        if (r.CNY && r.HKD) return { USDCNY: r.CNY, HKDCNY: r.CNY / r.HKD };
+        return null;
+      }
+    },
+    { url: 'https://api.exchangerate-api.com/v4/latest/USD', parse: function(d) {
+        var r = d.rates || {};
+        if (r.CNY && r.HKD) return { USDCNY: r.CNY, HKDCNY: r.CNY / r.HKD };
+        return null;
+      }
+    }
   ];
 
-  function trySource(url) {
+  function tryOne(src) {
     return new Promise(function(resolve, reject) {
       var timer = setTimeout(function() { reject(new Error('timeout')); }, 5000);
-      fetch(url).then(function(res) {
+      fetch(src.url).then(function(res) {
         clearTimeout(timer);
         return res.json();
-      }).then(resolve).catch(function(e) {
-        clearTimeout(timer);
-        reject(e);
-      });
+      }).then(function(data) {
+        var rates = src.parse(data);
+        if (rates && rates.USDCNY > 0) {
+          rates.USDCNY = Math.round(rates.USDCNY * 10000) / 10000;
+          rates.HKDCNY = Math.round(rates.HKDCNY * 10000) / 10000;
+          resolve(rates);
+        } else {
+          reject(new Error('no CNY'));
+        }
+      }).catch(function(e) { clearTimeout(timer); reject(e); });
     });
   }
 
-  function parseRates(data) {
-    var rates = {};
-    var r = data.rates || data;
-    if (r.CNY) {
-      rates.USDCNY = Math.round(r.CNY * 10000) / 10000;
-    }
-    if (r.HKD && r.CNY) {
-      rates.HKDCNY = Math.round((r.CNY / r.HKD) * 10000) / 10000;
-    }
-    return rates;
-  }
-
-  // 依次尝试每个源
-  return trySource(sources[0]).then(parseRates).catch(function() {
-    console.warn('[汇率] 源1失败，尝试源2');
-    return trySource(sources[1]).then(parseRates);
+  // 瀑布：依次尝试，一个成功就停
+  var chain = Promise.reject();
+  sources.forEach(function(src, i) {
+    chain = chain.catch(function() {
+      if (i > 0) console.warn('[汇率] 源' + i + '失败，尝试源' + (i + 1));
+      return tryOne(src);
+    });
   });
+  return chain;
 }
 
 /**
@@ -5747,9 +5768,32 @@ function fetchLivePrices() {
 
 /** 启动时加载行情 */
 function loadPriceFile() {
+  // 先从 localStorage 恢复上次成功的汇率
+  try {
+    var cached = localStorage.getItem(STORE_KEY + '_fx');
+    if (cached) {
+      var fx = JSON.parse(cached);
+      if (fx.USDCNY > 0 && fx.HKDCNY > 0) {
+        USDCNY = fx.USDCNY;
+        HKDCNY = fx.HKDCNY;
+        console.log('[汇率] 从缓存恢复: $=' + USDCNY + ' HK$=' + HKDCNY + ' (' + (fx.date || '?') + ')');
+      }
+    }
+  } catch(e) {}
+
   fetchLivePrices()
     .then(function(result) {
       console.log('[行情] 在线刷新: ' + result.updated + '只, USD/CNY=' + USDCNY + ', HKD/CNY=' + HKDCNY);
+      // 持久化汇率到 localStorage
+      if (result.rates && result.rates.USDCNY) {
+        try {
+          localStorage.setItem(STORE_KEY + '_fx', JSON.stringify({
+            USDCNY: USDCNY,
+            HKDCNY: HKDCNY,
+            date: new Date().toISOString().slice(0, 10)
+          }));
+        } catch(e) {}
+      }
       saveData();
       renderDashboard();
       renderHoldings();
