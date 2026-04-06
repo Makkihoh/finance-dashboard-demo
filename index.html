@@ -2654,7 +2654,8 @@ function fmtMoney(n) {
 
 function fmtMoneyWan(n) {
   if (n == null || isNaN(n)) return '¥-';
-  return '¥' + (n / 10000).toFixed(1) + '万';
+  var wan = Math.floor(n / 1000) / 10; // 截断到0.1万，不四舍五入
+  return '¥' + wan.toFixed(1) + '万';
 }
 
 /** 纯数字格式（不带¥，带千分位，用于hero大数字） */
