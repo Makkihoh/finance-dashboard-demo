@@ -5660,25 +5660,45 @@ function _parseQQVars(holdings) {
 }
 
 /**
- * 拉实时汇率 — open.er-api.com (免费 CORS HTTPS)
+ * 拉实时汇率 — 多源 fallback + 超时
  * 返回 { USDCNY: number, HKDCNY: number }
  */
 function fetchFXRates() {
-  return fetch('https://open.er-api.com/v6/latest/USD')
-    .then(function(res) { return res.json(); })
-    .then(function(data) {
-      var rates = {};
-      if (data && data.rates) {
-        if (data.rates.CNY) {
-          rates.USDCNY = Math.round(data.rates.CNY * 10000) / 10000;
-        }
-        if (data.rates.HKD && data.rates.CNY) {
-          // HKD/CNY = CNY/USD ÷ HKD/USD = rates.CNY / rates.HKD
-          rates.HKDCNY = Math.round((data.rates.CNY / data.rates.HKD) * 10000) / 10000;
-        }
-      }
-      return rates;
+  var sources = [
+    'https://api.exchangerate-api.com/v4/latest/USD',
+    'https://open.er-api.com/v6/latest/USD'
+  ];
+
+  function trySource(url) {
+    return new Promise(function(resolve, reject) {
+      var timer = setTimeout(function() { reject(new Error('timeout')); }, 5000);
+      fetch(url).then(function(res) {
+        clearTimeout(timer);
+        return res.json();
+      }).then(resolve).catch(function(e) {
+        clearTimeout(timer);
+        reject(e);
+      });
     });
+  }
+
+  function parseRates(data) {
+    var rates = {};
+    var r = data.rates || data;
+    if (r.CNY) {
+      rates.USDCNY = Math.round(r.CNY * 10000) / 10000;
+    }
+    if (r.HKD && r.CNY) {
+      rates.HKDCNY = Math.round((r.CNY / r.HKD) * 10000) / 10000;
+    }
+    return rates;
+  }
+
+  // 依次尝试每个源
+  return trySource(sources[0]).then(parseRates).catch(function() {
+    console.warn('[汇率] 源1失败，尝试源2');
+    return trySource(sources[1]).then(parseRates);
+  });
 }
 
 /**
