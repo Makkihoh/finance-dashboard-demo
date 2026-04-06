@@ -898,7 +898,11 @@ img, svg { display: block; max-width: 100%; }
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
   margin-bottom: var(--sp-md);
+  cursor: pointer;
+  transition: border-color var(--tr-fast);
 }
+.tiger-hero:hover { border-color: var(--color-warn); }
+.tiger-hero:active { opacity: 0.8; }
 .th-top-row {
   display: flex;
   align-items: center;
