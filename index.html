@@ -5448,20 +5448,22 @@ function switchTab(name) {
 }
 
 /* ================================================================
-   实时行情引擎 — 浏览器端直接调新浪财经 JSONP
-   覆盖：A股 + 港股 + 美股 + 汇率（USD/CNY, HKD/CNY）
+   实时行情引擎
+   - 股票行情：腾讯财经 qt.gtimg.cn（HTTPS JSONP，A/港/美全覆盖）
+   - 汇率：open.er-api.com（HTTPS CORS，免费无 key）
    ================================================================ */
 
 /**
- * JSONP 请求封装
- * 新浪行情返回格式: var hq_str_xxx="...";
- * 我们用 <script> 标签注入，通过全局拦截 var 赋值来解析
+ * 腾讯财经 JSONP — 用 <script> 标签注入
+ * 返回格式：var v_sh600900="..."; （A股逗号分隔）
+ *          var v_r_hk00005="..."; （港股波浪号分隔）
+ *          var v_usHSBC="...";    （美股波浪号分隔）
  */
-function _sinaJsonp(url, timeout) {
+function _qqJsonp(url, timeout) {
   var ms = timeout || 8000;
   return new Promise(function(resolve, reject) {
     var script = document.createElement('script');
-    script.charset = 'gbk'; // 新浪返回 GBK 编码
+    script.charset = 'utf-8';
     script.src = url;
     var timer = setTimeout(function() {
       cleanup();
@@ -5471,213 +5473,176 @@ function _sinaJsonp(url, timeout) {
       clearTimeout(timer);
       if (script.parentNode) script.parentNode.removeChild(script);
     }
-    script.onload = function() {
-      cleanup();
-      resolve(true);
-    };
-    script.onerror = function() {
-      cleanup();
-      reject(new Error('script load failed'));
-    };
+    script.onload = function() { cleanup(); resolve(true); };
+    script.onerror = function() { cleanup(); reject(new Error('script error')); };
     document.head.appendChild(script);
   });
 }
 
 /**
- * 构建新浪代码列表
- * A股: sh600900, sz000001, sh510300（ETF 5开头归sh）
- * 港股: rt_hk00005
- * 美股: gb_spy（新浪美股用 gb_ 前缀，ticker 小写）
- * 汇率: fx_susdcny, fx_shkcny
+ * 构建腾讯财经代码列表
  */
-function _buildSinaSymbols(holdings) {
+function _buildQQSymbols(holdings) {
   var symbols = [];
-  var codeMap = {}; // sinaCode -> holdingCode
-
   (holdings || []).forEach(function(h) {
     var code = h.code;
     var market = h.market;
     if (!code) return;
-
-    var sinaCode = '';
     if (market === 'A') {
-      if (code.startsWith('6') || code.startsWith('5')) {
-        sinaCode = 'sh' + code;
-      } else {
-        sinaCode = 'sz' + code;
-      }
+      symbols.push((code.startsWith('6') || code.startsWith('5')) ? 'sh' + code : 'sz' + code);
     } else if (market === '港') {
-      sinaCode = 'rt_hk' + code;
+      symbols.push('r_hk' + code);
     } else if (market === '美') {
-      // 新浪美股: gb_xxx，ticker 小写，BRK-B → brk-b
-      sinaCode = 'gb_' + code.toLowerCase();
-    }
-    if (sinaCode) {
-      symbols.push(sinaCode);
-      codeMap[sinaCode] = code;
+      // 腾讯美股: us + ticker（大小写保留）
+      symbols.push('us' + code.replace('-', '.'));
     }
   });
-
-  // 汇率
-  symbols.push('fx_susdcny');
-  symbols.push('fx_shkcny');
-
-  return { symbols: symbols, codeMap: codeMap };
+  return symbols;
 }
 
 /**
- * 解析新浪返回的 var hq_str_xxx="..." 全局变量
+ * 从 window 全局变量解析腾讯行情
  */
-function _parseSinaVars(holdings, codeMap) {
+function _parseQQVars(holdings) {
   var updated = 0;
-  var newRates = {};
-
   (holdings || []).forEach(function(h) {
     var code = h.code;
     var market = h.market;
     if (!code) return;
 
-    var sinaCode = '';
+    var varName = '';
     if (market === 'A') {
-      sinaCode = code.startsWith('6') || code.startsWith('5') ? 'sh' + code : 'sz' + code;
+      varName = 'v_' + ((code.startsWith('6') || code.startsWith('5')) ? 'sh' + code : 'sz' + code);
     } else if (market === '港') {
-      sinaCode = 'rt_hk' + code;
+      varName = 'v_r_hk' + code;
     } else if (market === '美') {
-      sinaCode = 'gb_' + code.toLowerCase();
+      varName = 'v_us' + code.replace('-', '.');
     }
 
-    var varName = 'hq_str_' + sinaCode;
     var val = null;
     try { val = window[varName]; } catch(e) {}
     if (!val || typeof val !== 'string' || val.length < 5) return;
 
-    var fields = val.split(',');
     var price = 0;
 
     if (market === 'A') {
-      // A股: fields[3] = 当前价
-      price = parseFloat(fields[3]) || 0;
+      // A股：逗号分隔，fields[3] = 当前价
+      var aFields = val.split(',');
+      if (aFields.length > 3) price = parseFloat(aFields[3]) || 0;
     } else if (market === '港') {
-      // 港股: fields[6] = 当前价，fields[3] = 昨收（备用）
-      price = parseFloat(fields[6]) || parseFloat(fields[3]) || 0;
+      // 港股：波浪号分隔，fields[6] = 当前价
+      var hkFields = val.split('~');
+      if (hkFields.length > 6) price = parseFloat(hkFields[6]) || 0;
     } else if (market === '美') {
-      // 新浪美股: fields[1] = 当前价
-      price = parseFloat(fields[1]) || 0;
+      // 美股：波浪号分隔，fields[1] = 中文名, fields[2] = 代码, fields[3] = 当前价
+      var usFields = val.split('~');
+      if (usFields.length > 3) {
+        // 尝试 fields[3] 先（有些版本当前价在这）
+        var p3 = parseFloat(usFields[3]);
+        if (p3 > 0) {
+          price = p3;
+        } else {
+          // fallback: 遍历找一个合理的数值
+          for (var i = 1; i < Math.min(usFields.length, 10); i++) {
+            var pv = parseFloat(usFields[i]);
+            if (pv > 1) { price = pv; break; }
+          }
+        }
+      }
     }
 
     if (price > 0) {
       h.currentPrice = String(price);
       updated++;
     }
+
+    // 清理全局变量
+    try { delete window[varName]; } catch(e) {}
   });
 
-  // 解析汇率
-  try {
-    var usdStr = window['hq_str_fx_susdcny'];
-    if (usdStr) {
-      var usdFields = usdStr.split(',');
-      for (var i = 0; i < usdFields.length; i++) {
-        var v = parseFloat(usdFields[i]);
-        if (v > 6.0 && v < 8.5) { newRates.USDCNY = Math.round(v * 10000) / 10000; break; }
-      }
-    }
-  } catch(e) {}
-
-  try {
-    var hkdStr = window['hq_str_fx_shkcny'];
-    if (hkdStr) {
-      var hkdFields = hkdStr.split(',');
-      for (var j = 0; j < hkdFields.length; j++) {
-        var w = parseFloat(hkdFields[j]);
-        if (w > 0.7 && w < 1.2) { newRates.HKDCNY = Math.round(w * 10000) / 10000; break; }
-      }
-    }
-  } catch(e) {}
-
-  return { updated: updated, rates: newRates };
+  return updated;
 }
 
 /**
- * 清理新浪注入的全局变量（避免下次读到旧值）
+ * 拉实时汇率 — open.er-api.com (免费 CORS HTTPS)
+ * 返回 { USDCNY: number, HKDCNY: number }
  */
-function _cleanSinaVars(symbols) {
-  symbols.forEach(function(s) {
-    try { delete window['hq_str_' + s]; } catch(e) {}
+function fetchFXRates() {
+  return fetch('https://open.er-api.com/v6/latest/USD')
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+      var rates = {};
+      if (data && data.rates) {
+        if (data.rates.CNY) {
+          rates.USDCNY = Math.round(data.rates.CNY * 10000) / 10000;
+        }
+        if (data.rates.HKD && data.rates.CNY) {
+          // HKD/CNY = CNY/USD ÷ HKD/USD = rates.CNY / rates.HKD
+          rates.HKDCNY = Math.round((data.rates.CNY / data.rates.HKD) * 10000) / 10000;
+        }
+      }
+      return rates;
+    });
+}
+
+/**
+ * 拉实时股票行情 — 腾讯财经 JSONP
+ * 返回更新数量
+ */
+function fetchStockPrices() {
+  if (!DATA || !DATA.holdings || DATA.holdings.length === 0) {
+    return Promise.resolve(0);
+  }
+  var symbols = _buildQQSymbols(DATA.holdings);
+  if (symbols.length === 0) return Promise.resolve(0);
+
+  var url = 'https://qt.gtimg.cn/q=' + symbols.join(',');
+  return _qqJsonp(url).then(function() {
+    return _parseQQVars(DATA.holdings);
   });
 }
 
 /**
- * 从新浪拉实时行情 + 汇率（浏览器端 JSONP）
- * 返回 Promise<{updated, rates}>
+ * 综合拉取：行情 + 汇率（并行）
  */
 function fetchLivePrices() {
-  if (!DATA || !DATA.holdings || DATA.holdings.length === 0) {
-    return Promise.resolve({ updated: 0, rates: {} });
-  }
-
-  var info = _buildSinaSymbols(DATA.holdings);
-  var url = 'https://hq.sinajs.cn/list=' + info.symbols.join(',');
-
-  // 先清理旧变量
-  _cleanSinaVars(info.symbols);
-
-  return _sinaJsonp(url).then(function() {
-    var result = _parseSinaVars(DATA.holdings, info.codeMap);
+  return Promise.all([
+    fetchStockPrices().catch(function(e) { console.warn('[行情] 股票拉取失败:', e); return 0; }),
+    fetchFXRates().catch(function(e) { console.warn('[行情] 汇率拉取失败:', e); return {}; })
+  ]).then(function(results) {
+    var stocksUpdated = results[0];
+    var rates = results[1];
 
     // 更新全局汇率
-    if (result.rates.USDCNY) USDCNY = result.rates.USDCNY;
-    if (result.rates.HKDCNY) HKDCNY = result.rates.HKDCNY;
+    if (rates.USDCNY) USDCNY = rates.USDCNY;
+    if (rates.HKDCNY) HKDCNY = rates.HKDCNY;
 
-    // 更新状态
+    // 更新时间戳
     PRICES_UPDATED_AT = new Date().toISOString();
-    PRICES_STATUS = 'ok';
+    PRICES_STATUS = stocksUpdated > 0 ? 'ok' : 'stale';
 
-    return result;
+    return { updated: stocksUpdated, rates: rates };
   });
 }
 
 /* ================================================================
-   对外接口：启动加载 + 手动刷新
+   对外接口
    ================================================================ */
 
-/** 启动时加载行情（先尝试在线，失败则尝试本地 JSON 文件） */
+/** 启动时加载行情 */
 function loadPriceFile() {
   fetchLivePrices()
     .then(function(result) {
-      console.log('[行情] 在线刷新成功: ' + result.updated + ' 只更新, USD/CNY=' + USDCNY + ', HKD/CNY=' + HKDCNY);
+      console.log('[行情] 在线刷新: ' + result.updated + '只, USD/CNY=' + USDCNY + ', HKD/CNY=' + HKDCNY);
       saveData();
       renderDashboard();
       renderHoldings();
       renderStatusBar();
     })
     .catch(function(err) {
-      console.warn('[行情] 在线刷新失败，尝试本地文件', err);
-      // fallback: 尝试读本地 prices_latest.json
-      fetch('prices_latest.json')
-        .then(function(res) { if (!res.ok) throw new Error('HTTP ' + res.status); return res.json(); })
-        .then(function(data) {
-          if (data.rates) {
-            if (data.rates.USDCNY) USDCNY = data.rates.USDCNY;
-            if (data.rates.HKDCNY) HKDCNY = data.rates.HKDCNY;
-          }
-          if (data.prices && DATA.holdings) {
-            DATA.holdings.forEach(function(h) {
-              var entry = data.prices[h.code];
-              if (entry && entry.price !== undefined) h.currentPrice = entry.price;
-            });
-          }
-          PRICES_UPDATED_AT = data.updatedAt || null;
-          PRICES_STATUS = PRICES_UPDATED_AT ? 'stale' : 'offline';
-          saveData();
-          renderDashboard();
-          renderHoldings();
-          renderStatusBar();
-        })
-        .catch(function() {
-          PRICES_STATUS = 'offline';
-          renderStatusBar();
-          console.warn('[行情] 离线模式');
-        });
+      console.warn('[行情] 全部失败，离线模式', err);
+      PRICES_STATUS = 'offline';
+      renderStatusBar();
     });
 }
 
@@ -5710,14 +5675,13 @@ function refreshPrices() {
    ================================================================ */
 function initApp() {
   loadData();
-  // 启动时强制补录本月快照
   try { recordMonthlySnapshot(true); } catch(e) {}
   renderDashboard();
   renderHoldings();
   renderLedger();
   renderPlan();
   renderStatusBar();
-  // 拉实时行情（异步，不阻塞渲染）
+  // 异步拉实时行情（不阻塞首屏渲染）
   loadPriceFile();
 }
 
