@@ -5000,7 +5000,10 @@ var renderLedger = renderAccount;
 /* ── 导出/导入/重置（复用） ── */
 function handleExport() {
   try {
-    var json = JSON.stringify(DATA, null, 2);
+    // 导出时附带当前汇率，方便跨版本导入
+    var exportData = JSON.parse(JSON.stringify(DATA));
+    exportData.fx = { USDCNY: USDCNY, HKDCNY: HKDCNY };
+    var json = JSON.stringify(exportData, null, 2);
     var blob = new Blob([json], { type: 'application/json' });
     var url = URL.createObjectURL(blob);
     var a = document.createElement('a');
@@ -5023,13 +5026,19 @@ function handleImport(event) {
   reader.onload = function(e) {
     try {
       var imported = JSON.parse(e.target.result);
-      Object.assign(DATA, imported);
-      // 关键：刷新版本号为当前版本，防止刷新后被版本迁移覆盖
+      // 完全替换 DATA（而非浅合并），避免残留旧字段
+      DATA = imported;
+      // 刷新版本号为当前版本，防止刷新后被版本迁移覆盖
       DATA.meta = DATA.meta || {};
       DATA.meta.version = DATA_VERSION;
       DATA.meta.updatedAt = new Date().toISOString();
+      // 同步汇率：如果导入数据中有汇率信息则更新全局变量
+      if (imported.fx) {
+        if (imported.fx.USDCNY) USDCNY = imported.fx.USDCNY;
+        if (imported.fx.HKDCNY) HKDCNY = imported.fx.HKDCNY;
+      }
       saveData();
-      showToast('数据已导入');
+      showToast('数据已导入，共 ' + (DATA.holdings || []).length + ' 只持仓');
       renderDashboard();
       renderHoldings();
       renderAccount();
