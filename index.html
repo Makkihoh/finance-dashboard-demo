@@ -2076,13 +2076,10 @@ function loadData() {
   if (result && result.meta && result.meta.version !== DATA_VERSION) {
     console.log('数据版本 ' + (result.meta.version || '?') + ' → ' + DATA_VERSION + '，合并迁移');
     var defaults = getDefaultData();
-    var userDataKeys = ['monthlyRecords', 'cashAccounts', 'history'];
+    // 只补缺失字段，绝不覆盖用户已有数据
     Object.keys(defaults).forEach(function(key) {
-      if (userDataKeys.indexOf(key) >= 0) {
-        if (!result[key] || (Array.isArray(result[key]) && result[key].length === 0)) {
-          result[key] = defaults[key];
-        }
-      } else {
+      if (key === 'meta') return;
+      if (result[key] === undefined || result[key] === null) {
         result[key] = defaults[key];
       }
     });
@@ -5027,6 +5024,10 @@ function handleImport(event) {
     try {
       var imported = JSON.parse(e.target.result);
       Object.assign(DATA, imported);
+      // 关键：刷新版本号为当前版本，防止刷新后被版本迁移覆盖
+      DATA.meta = DATA.meta || {};
+      DATA.meta.version = DATA_VERSION;
+      DATA.meta.updatedAt = new Date().toISOString();
       saveData();
       showToast('数据已导入');
       renderDashboard();
