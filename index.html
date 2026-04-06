@@ -3663,39 +3663,45 @@ function renderHoldings() {
   html += '</div>'; // tiger-hero
 
   // ══════════════════════════════════════════
-  //  2. 券商现金余额（3币种输入 + 汇率显示）
+  //  2. 券商现金余额（可折叠，默认收起）
   // ══════════════════════════════════════════
-  html += '<div class="card" style="margin-top:var(--sp-md)">';
-  html += '  <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">';
-  html += '    <span>券商现金余额</span>';
-  html += '    <span style="font-size:var(--fs-xs);color:var(--text-muted)">汇率 $1=¥' + USDCNY.toFixed(3) + '  HK$1=¥' + HKDCNY.toFixed(4) + '</span>';
+  html += '<div class="card bc-card" style="margin-top:var(--sp-md);cursor:pointer" onclick="toggleBrokerCash(event)">';
+  html += '  <div class="bc-header">';
+  html += '    <div>';
+  html += '      <div style="font-size:var(--fs-xs);color:var(--text-muted)">券商现金 (CNY)</div>';
+  html += '      <div style="font-size:var(--fs-xl);font-weight:var(--fw-bold);color:var(--text-primary);margin-top:2px" class="asset-num">' + fmtMoney(cashTotal) + '</div>';
+  html += '    </div>';
+  html += '    <div style="text-align:right">';
+  html += '      <div style="font-size:10px;color:var(--text-muted)">$1=¥' + USDCNY.toFixed(3) + ' · HK$1=¥' + HKDCNY.toFixed(4) + '</div>';
+  html += '      <div style="font-size:10px;color:var(--text-muted);margin-top:2px" id="bcArrow">点击展开 ▾</div>';
+  html += '    </div>';
   html += '  </div>';
+
+  html += '  <div class="bc-detail" id="bcDetail" style="display:none;margin-top:var(--sp-sm);padding-top:var(--sp-sm);border-top:1px solid var(--glass-border)">';
 
   // 美元
-  html += '  <div class="broker-cash-row">';
-  html += '    <div class="bc-label">USD 美元</div>';
-  html += '    <input type="number" class="form-input bc-input" id="bcUSD" value="' + cbUSD + '" onchange="updateBrokerCash()" step="0.01" />';
-  html += '    <div class="bc-cny">≈ ¥' + fmtNum(cashUsdCny) + '</div>';
-  html += '  </div>';
+  html += '    <div class="broker-cash-row">';
+  html += '      <div class="bc-label">USD 美元</div>';
+  html += '      <input type="number" class="form-input bc-input" id="bcUSD" value="' + cbUSD + '" onchange="updateBrokerCash()" onclick="event.stopPropagation()" step="0.01" />';
+  html += '      <div class="bc-cny">≈ ¥' + fmtNum(cashUsdCny) + '</div>';
+  html += '    </div>';
 
   // 港币
-  html += '  <div class="broker-cash-row">';
-  html += '    <div class="bc-label">HKD 港币</div>';
-  html += '    <input type="number" class="form-input bc-input" id="bcHKD" value="' + cbHKD + '" onchange="updateBrokerCash()" step="0.01" />';
-  html += '    <div class="bc-cny">≈ ¥' + fmtNum(cashHkdCny) + '</div>';
-  html += '  </div>';
+  html += '    <div class="broker-cash-row">';
+  html += '      <div class="bc-label">HKD 港币</div>';
+  html += '      <input type="number" class="form-input bc-input" id="bcHKD" value="' + cbHKD + '" onchange="updateBrokerCash()" onclick="event.stopPropagation()" step="0.01" />';
+  html += '      <div class="bc-cny">≈ ¥' + fmtNum(cashHkdCny) + '</div>';
+  html += '    </div>';
 
   // 人民币
-  html += '  <div class="broker-cash-row">';
-  html += '    <div class="bc-label">CNY 人民币</div>';
-  html += '    <input type="number" class="form-input bc-input" id="bcCNY" value="' + cbCNY + '" onchange="updateBrokerCash()" step="0.01" />';
-  html += '    <div class="bc-cny">¥' + fmtNum(cbCNY) + '</div>';
-  html += '  </div>';
+  html += '    <div class="broker-cash-row">';
+  html += '      <div class="bc-label">CNY 人民币</div>';
+  html += '      <input type="number" class="form-input bc-input" id="bcCNY" value="' + cbCNY + '" onchange="updateBrokerCash()" onclick="event.stopPropagation()" step="0.01" />';
+  html += '      <div class="bc-cny">¥' + fmtNum(cbCNY) + '</div>';
+  html += '    </div>';
 
-  html += '  <div style="text-align:right;padding-top:var(--sp-xs);border-top:1px solid var(--glass-border);margin-top:var(--sp-xs);font-size:var(--fs-sm);color:var(--text-secondary)">';
-  html += '    合计 <strong style="color:var(--text-primary)">' + fmtMoney(cashTotal) + '</strong>';
-  html += '  </div>';
-  html += '</div>';
+  html += '  </div>'; // bc-detail
+  html += '</div>'; // card
 
   // ══════════════════════════════════════════
   //  2. 层级/市场切换 Tab
@@ -4123,6 +4129,22 @@ function updateBrokerCash() {
   renderHoldings();
   renderDashboard();
   renderStatusBar();
+}
+
+/** 折叠/展开券商现金明细 */
+function toggleBrokerCash(e) {
+  // 不拦截 input 点击
+  if (e && e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON')) return;
+  var detail = document.getElementById('bcDetail');
+  var arrow = document.getElementById('bcArrow');
+  if (!detail) return;
+  if (detail.style.display === 'none') {
+    detail.style.display = 'block';
+    if (arrow) arrow.textContent = '收起 ▴';
+  } else {
+    detail.style.display = 'none';
+    if (arrow) arrow.textContent = '点击展开 ▾';
+  }
 }
 
 /** 获取券商现金 CNY 合计（供首页 calcAssetBreakdown 调用） */
