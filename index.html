@@ -1254,6 +1254,34 @@ img, svg { display: block; max-width: 100%; }
   font-size: var(--fs-sm);
 }
 
+/* ── 券商现金余额输入 ── */
+.broker-cash-row {
+  display: grid;
+  grid-template-columns: 80px 1fr auto;
+  gap: var(--sp-sm);
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(132,142,156,0.06);
+}
+.broker-cash-row:last-of-type { border-bottom: none; }
+.bc-label {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  font-weight: var(--fw-medium);
+}
+.bc-input {
+  text-align: right;
+  padding: 6px 10px !important;
+  font-size: var(--fs-sm) !important;
+  background: rgba(43,47,54,0.5) !important;
+}
+.bc-cny {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  min-width: 80px;
+  text-align: right;
+}
+
 /* === Account Page — 账户（现金账户 + 月度收支 + 负债） === */
 
 /* ── 分区标题 ── */
@@ -3170,19 +3198,10 @@ function calcAssetBreakdown() {
     }
   });
 
-  // 券商现金（优先用用户填的 CNY 总额，兼容旧的分币种字段）
+  // 券商现金（统一用 getBrokerCashCNY，3币种×当天汇率）
   var brokerCash = 0;
-  var fm = DATA.family || {};
-  if (fm.cashBreakdown) {
-    if (fm.cashBreakdown.totalCNY != null) {
-      // 新方式：用户直接填券商显示的人民币总余额
-      brokerCash = fm.cashBreakdown.totalCNY;
-    } else {
-      // 旧方式：分币种×汇率（不够精确，但兼容）
-      brokerCash += (fm.cashBreakdown.tigerUSD || 0) * USDCNY;
-      brokerCash += (fm.cashBreakdown.tigerHKD || 0) * HKDCNY;
-      brokerCash += (fm.cashBreakdown.aShareCash || 0);
-    }
+  if (typeof getBrokerCashCNY === 'function') {
+    brokerCash = getBrokerCashCNY();
   }
 
   var holdingsTotal = securityTotal + brokerCash; // 持仓页预估总资产
@@ -3566,16 +3585,14 @@ function renderHoldings() {
 
   // ── 计算汇总 ──
   var totalSecValue = 0, totalSecCost = 0;
-  var cashTotal = 0;
   var marketGroups = { 'A': [], '港': [], '美': [] };
 
   holdings.forEach(function(h) {
-    // 先加入市场分组（确保合并行也显示）
     if (marketGroups[h.market]) {
       marketGroups[h.market].push(h);
     }
     var mv = calcMarketValue(h);
-    if (mv.merged) return;  // 合并行不计入汇总市值（已归到主行）
+    if (mv.merged) return;
     totalSecValue += mv.valueCNY;
     var shares = mv.shares || h.shares || 0;
     var cost = parseFloat(h.cost) || 0;
@@ -3585,30 +3602,26 @@ function renderHoldings() {
     }
   });
 
-  // 券商现金（优先用 CNY 总额，兼容旧的分币种字段）
-  var fm = DATA.family || {};
-  if (fm.cashBreakdown) {
-    if (fm.cashBreakdown.totalCNY != null) {
-      cashTotal = fm.cashBreakdown.totalCNY;
-    } else {
-      cashTotal += (fm.cashBreakdown.tigerUSD || 0) * USDCNY;
-      cashTotal += (fm.cashBreakdown.tigerHKD || 0) * HKDCNY;
-      cashTotal += (fm.cashBreakdown.aShareCash || 0);
-    }
-  }
+  // ── 券商现金（3币种 × 当天汇率）──
+  var cb = (DATA.family && DATA.family.cashBreakdown) || {};
+  var cbUSD = cb.USD || 0;
+  var cbHKD = cb.HKD || 0;
+  var cbCNY = cb.CNY || 0;
+  // 兼容旧字段
+  if (!cbUSD && cb.tigerUSD) cbUSD = cb.tigerUSD;
+  if (!cbHKD && cb.tigerHKD) cbHKD = cb.tigerHKD;
+  if (!cbCNY && cb.aShareCash) cbCNY = cb.aShareCash;
 
-  // 流动资金（cashAccounts）— 与首页口径一致
-  var liquidCash = 0;
-  if (typeof getCashAccountTotal === 'function') {
-    liquidCash = getCashAccountTotal();
-  }
+  var cashUsdCny = cbUSD * USDCNY;
+  var cashHkdCny = cbHKD * HKDCNY;
+  var cashTotal = cashUsdCny + cashHkdCny + cbCNY;
 
-  var grandTotal = totalSecValue + cashTotal + liquidCash;
+  var grandTotal = totalSecValue + cashTotal;
   var totalPnl = totalSecCost > 0 ? totalSecValue - totalSecCost : 0;
   var totalPnlPct = totalSecCost > 0 ? (totalSecValue - totalSecCost) / totalSecCost : 0;
 
   // ══════════════════════════════════════════
-  //  1. 顶部资产总览（老虎风格）
+  //  1. 顶部资产总览
   // ══════════════════════════════════════════
   html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--sp-sm)">';
   html += '  <span></span>';
@@ -3617,7 +3630,6 @@ function renderHoldings() {
 
   html += '<div class="tiger-hero">';
 
-  // 第1行：总资产标签 + 眼睛图标
   html += '  <div class="th-top-row">';
   html += '    <span class="th-label">预估总资产 (CNY)</span>';
   html += '    <span class="th-eye" onclick="toggleAssetVisibility()" id="eyeToggle">';
@@ -3625,7 +3637,6 @@ function renderHoldings() {
   html += '    </span>';
   html += '  </div>';
 
-  // 第2行：总资产大数字 + 持仓盈亏
   html += '  <div class="th-main-row">';
   html += '    <div class="th-amount asset-num" id="assetAmount">' + fmtMoneyPlain(grandTotal) + '</div>';
   html += '    <div class="th-pnl-side">';
@@ -3634,7 +3645,6 @@ function renderHoldings() {
   html += '    </div>';
   html += '  </div>';
 
-  // 第3行：证券总值 / 剩余现金 / 持仓盈亏%
   html += '  <div class="th-stats-row">';
   html += '    <div class="th-stat">';
   html += '      <div class="th-stat-label">证券总值</div>';
@@ -3645,12 +3655,47 @@ function renderHoldings() {
   html += '      <div class="th-stat-val num ' + pnlClass(totalPnlPct) + ' asset-num">' + fmtPct(totalPnlPct) + '</div>';
   html += '    </div>';
   html += '    <div class="th-stat">';
-  html += '      <div class="th-stat-label">现金类资产</div>';
+  html += '      <div class="th-stat-label">券商现金</div>';
   html += '      <div class="th-stat-val asset-num">' + fmtMoneyShort(cashTotal) + '</div>';
   html += '    </div>';
   html += '  </div>';
 
   html += '</div>'; // tiger-hero
+
+  // ══════════════════════════════════════════
+  //  2. 券商现金余额（3币种输入 + 汇率显示）
+  // ══════════════════════════════════════════
+  html += '<div class="card" style="margin-top:var(--sp-md)">';
+  html += '  <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">';
+  html += '    <span>券商现金余额</span>';
+  html += '    <span style="font-size:var(--fs-xs);color:var(--text-muted)">汇率 $1=¥' + USDCNY.toFixed(3) + '  HK$1=¥' + HKDCNY.toFixed(4) + '</span>';
+  html += '  </div>';
+
+  // 美元
+  html += '  <div class="broker-cash-row">';
+  html += '    <div class="bc-label">USD 美元</div>';
+  html += '    <input type="number" class="form-input bc-input" id="bcUSD" value="' + cbUSD + '" onchange="updateBrokerCash()" step="0.01" />';
+  html += '    <div class="bc-cny">≈ ¥' + fmtNum(cashUsdCny) + '</div>';
+  html += '  </div>';
+
+  // 港币
+  html += '  <div class="broker-cash-row">';
+  html += '    <div class="bc-label">HKD 港币</div>';
+  html += '    <input type="number" class="form-input bc-input" id="bcHKD" value="' + cbHKD + '" onchange="updateBrokerCash()" step="0.01" />';
+  html += '    <div class="bc-cny">≈ ¥' + fmtNum(cashHkdCny) + '</div>';
+  html += '  </div>';
+
+  // 人民币
+  html += '  <div class="broker-cash-row">';
+  html += '    <div class="bc-label">CNY 人民币</div>';
+  html += '    <input type="number" class="form-input bc-input" id="bcCNY" value="' + cbCNY + '" onchange="updateBrokerCash()" step="0.01" />';
+  html += '    <div class="bc-cny">¥' + fmtNum(cbCNY) + '</div>';
+  html += '  </div>';
+
+  html += '  <div style="text-align:right;padding-top:var(--sp-xs);border-top:1px solid var(--glass-border);margin-top:var(--sp-xs);font-size:var(--fs-sm);color:var(--text-secondary)">';
+  html += '    合计 <strong style="color:var(--text-primary)">' + fmtMoney(cashTotal) + '</strong>';
+  html += '  </div>';
+  html += '</div>';
 
   // ══════════════════════════════════════════
   //  2. 层级/市场切换 Tab
@@ -4060,6 +4105,33 @@ function handleEditHolding(idx) {
     renderHoldings();
     showToast('已更新 ' + (formData.name || ''));
   });
+}
+
+/** 更新券商现金余额（3币种输入框 onchange） */
+function updateBrokerCash() {
+  var usd = parseFloat(document.getElementById('bcUSD').value) || 0;
+  var hkd = parseFloat(document.getElementById('bcHKD').value) || 0;
+  var cny = parseFloat(document.getElementById('bcCNY').value) || 0;
+
+  if (!DATA.family) DATA.family = {};
+  DATA.family.cashBreakdown = {
+    USD: usd,
+    HKD: hkd,
+    CNY: cny
+  };
+  saveData();
+  renderHoldings();
+  renderDashboard();
+  renderStatusBar();
+}
+
+/** 获取券商现金 CNY 合计（供首页 calcAssetBreakdown 调用） */
+function getBrokerCashCNY() {
+  var cb = (DATA.family && DATA.family.cashBreakdown) || {};
+  var usd = cb.USD || cb.tigerUSD || 0;
+  var hkd = cb.HKD || cb.tigerHKD || 0;
+  var cny = cb.CNY || cb.aShareCash || 0;
+  return usd * USDCNY + hkd * HKDCNY + cny;
 }
 
 /* === Account Tab — 账户（现金账户 + 月度收支 + 负债） === */
